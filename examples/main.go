@@ -1,26 +1,39 @@
 package main
 
 import (
-	"github.com/Calcium-Ion/go-epay/epay"
-	"github.com/samber/lo"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+
+	"github.com/Calcium-Ion/go-epay/epay"
+	"github.com/samber/lo"
 )
 
 func main() {
-	baseUrl := "http://localhost:8080"
+	baseURL := mustGetenv("EPAY_BASE_URL")
+	appBaseURL := mustGetenv("APP_PUBLIC_URL")
+
 	client, err := epay.NewClient(&epay.Config{
-		PartnerID: "1000",
-		Key:       "KEY",
-	}, baseUrl)
+		PartnerID: mustGetenv("EPAY_PARTNER_ID"),
+		Key:       mustGetenv("EPAY_KEY"),
+	}, baseURL)
 	if err != nil {
 		log.Panicln(err)
 	}
-	notify, _ := url.Parse(baseUrl + "/verify")
+
+	callbackURL, err := url.JoinPath(appBaseURL, "verify")
+	if err != nil {
+		log.Panicln(err)
+	}
+	notify, err := url.Parse(callbackURL)
+	if err != nil {
+		log.Panicln(err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
-		url, params, err := client.Purchase(&epay.PurchaseArgs{
+		paymentURL, params, err := client.Purchase(&epay.PurchaseArgs{
 			Type:           "wxpay",
 			ServiceTradeNo: "8412317576584121",
 			Name:           "test",
@@ -34,7 +47,7 @@ func main() {
 			return
 		}
 
-		html := "<form id='alipaysubmit' name='alipaysubmit' action='" + url + "' method='POST'>"
+		html := "<form id='alipaysubmit' name='alipaysubmit' action='" + paymentURL + "' method='POST'>"
 		for key, value := range params {
 			html += "<input type='hidden' name='" + key + "' value='" + value + "'/>"
 		}
@@ -60,5 +73,15 @@ func main() {
 			log.Println(verifyInfo)
 		}
 	})
-	http.ListenAndServe(":8080", mux)
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		log.Panicln(err)
+	}
+}
+
+func mustGetenv(key string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		log.Fatalf("%s is required", key)
+	}
+	return value
 }

@@ -35,7 +35,6 @@ const (
 
 // Purchase 生成支付链接和参数
 func (c *Client) Purchase(args *PurchaseArgs) (string, map[string]string, error) {
-	// see https://payment.moe/doc.html
 	requestParams := map[string]string{
 		"pid":          c.Config.PartnerID,
 		"type":         args.Type,
