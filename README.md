@@ -72,6 +72,32 @@ if verifyRes.VerifyStatus && verifyRes.TradeStatus == epay.StatusTradeSuccess {
 }
 ```
 
+`Verify` 不会修改传入的参数。参数包含歧义分隔符时返回错误；签名不匹配时，`VerifyStatus` 为 `false`。
+
+## 签名参数限制
+
+易支付 [MD5 签名协议](https://pay.yzfpay.com/doc/v1_legacy_api.html) 要求按参数名排序后拼接原始值，不对值做 URL 编码。本 SDK 保留这一格式，并在签名和验签前拒绝会造成参数边界歧义的输入：
+
+- 参与签名的参数名不得为空，也不得包含 `&` 或 `=`。
+- 参与签名的参数值不得包含 `&`，包括商品名称、订单号、`notify_url` 和 `return_url`。
+- 值中的 `=`、空格、中文、`+` 和字面量 `%26` 保持原样；SDK 不会额外解码或转义它们。
+
+例如，`return_url=https://example.com/return?a=1&b=2` 会被拒绝。回调地址请使用路径或单个 query 参数承载业务状态。不要将整个 URL 编码来绕过限制，否则可能改变网关跳转地址。
+
+`Purchase`、`Verify` 会返回可通过 `errors.Is(err, epay.ErrInvalidParams)` 判断的错误。自行生成签名时，请使用支持错误返回的接口：
+
+```go
+signedParams, err := epay.GenerateParamsWithError(params, merchantKey)
+if err != nil {
+	return err
+}
+// 使用 signedParams 提交支付请求
+```
+
+旧接口 `GenerateParams` 保留函数签名，但非法输入返回 `nil`，不修改原参数；请迁移到 `GenerateParamsWithError`。旧接口 `CreateUrlString` 对非法输入返回空字符串，请迁移到 `CreateUrlStringWithError`，不要对失败返回的空字符串继续计算签名。
+
+此校验不会使修复前已签发的歧义签名失效；升级后应停止继续使用这类历史支付参数。
+
 ## 配置项
 
 | 名称 | 说明 |

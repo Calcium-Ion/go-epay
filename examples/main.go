@@ -63,12 +63,12 @@ func main() {
 		}, map[string]string{})
 
 		verifyInfo, err := client.Verify(params)
-		if err == nil && verifyInfo.VerifyStatus {
-			writer.Write([]byte("success"))
-		} else {
+		if err != nil || !verifyInfo.VerifyStatus {
 			writer.Write([]byte("fail"))
+			return
 		}
 
+		writer.Write([]byte("success"))
 		if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
 			log.Println(verifyInfo)
 		}

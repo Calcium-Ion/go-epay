@@ -1,6 +1,7 @@
 package epay
 
 import (
+	"crypto/subtle"
 	"net/url"
 	"path"
 
@@ -54,7 +55,11 @@ func (c *Client) Purchase(args *PurchaseArgs) (string, map[string]string, error)
 	}
 	u.Path = path.Join(u.Path, PurchaseUrl)
 
-	return u.String(), GenerateParams(requestParams, c.Config.Key), nil
+	signedParams, err := GenerateParamsWithError(requestParams, c.Config.Key)
+	if err != nil {
+		return "", nil, err
+	}
+	return u.String(), signedParams, nil
 }
 
 const StatusTradeSuccess = "TRADE_SUCCESS"
@@ -77,15 +82,16 @@ type VerifyRes struct {
 }
 
 func (c *Client) Verify(params map[string]string) (*VerifyRes, error) {
-	sign := params["sign"]
-	var verifyRes VerifyRes
-	// 从 map 映射到 struct 上
-	err := mapstructure.Decode(params, &verifyRes)
-	// 验证签名
-	verifyRes.VerifyStatus = sign == GenerateParams(params, c.Config.Key)["sign"]
+	expectedSign, err := generateSign(params, c.Config.Key)
 	if err != nil {
 		return nil, err
-	} else {
-		return &verifyRes, nil
 	}
+	var verifyRes VerifyRes
+	// 从 map 映射到 struct 上
+	if err := mapstructure.Decode(params, &verifyRes); err != nil {
+		return nil, err
+	}
+	// 验签只读取输入，避免将错误签名覆盖为正确签名。
+	verifyRes.VerifyStatus = subtle.ConstantTimeCompare([]byte(params["sign"]), []byte(expectedSign)) == 1
+	return &verifyRes, nil
 }
