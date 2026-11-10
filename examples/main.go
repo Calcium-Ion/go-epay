@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/samber/lo"
@@ -14,10 +17,20 @@ func main() {
 	baseURL := mustGetenv("EPAY_BASE_URL")
 	appBaseURL := mustGetenv("APP_PUBLIC_URL")
 
-	client, err := epay.NewClient(&epay.Config{
+	// EPAY_SIGN_TYPE 为 RSA 时使用商户私钥和平台公钥，否则使用 MD5 商户密钥。
+	signType := os.Getenv("EPAY_SIGN_TYPE")
+	rsaMode := strings.EqualFold(signType, epay.SignTypeRSA)
+	config := &epay.Config{
 		PartnerID: mustGetenv("EPAY_PARTNER_ID"),
-		Key:       mustGetenv("EPAY_KEY"),
-	}, baseURL)
+		SignType:  signType,
+	}
+	if rsaMode {
+		config.MerchantPrivateKey = mustGetenv("EPAY_MERCHANT_PRIVATE_KEY")
+		config.PlatformPublicKey = mustGetenv("EPAY_PLATFORM_PUBLIC_KEY")
+	} else {
+		config.Key = mustGetenv("EPAY_KEY")
+	}
+	client, err := epay.NewClient(config, baseURL)
 	if err != nil {
 		log.Panicln(err)
 	}
@@ -73,6 +86,43 @@ func main() {
 			log.Println(verifyInfo)
 		}
 	})
+	if rsaMode {
+		queryURL, err := url.JoinPath(baseURL, "api/pay/query")
+		if err != nil {
+			log.Panicln(err)
+		}
+		// 订单查询：SignParams 签名请求，VerifyResponse 校验返回数据。
+		mux.HandleFunc("/query", func(writer http.ResponseWriter, request *http.Request) {
+			params, err := client.SignParams(map[string]string{
+				"out_trade_no": request.URL.Query().Get("out_trade_no"),
+			})
+			if err != nil {
+				http.Error(writer, err.Error(), http.StatusBadRequest)
+				return
+			}
+			form := url.Values{}
+			for key, value := range params {
+				form.Set(key, value)
+			}
+			resp, err := http.PostForm(queryURL, form)
+			if err != nil {
+				http.Error(writer, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				http.Error(writer, err.Error(), http.StatusBadGateway)
+				return
+			}
+			result, err := client.VerifyResponse(body)
+			if err != nil {
+				http.Error(writer, err.Error(), http.StatusBadGateway)
+				return
+			}
+			fmt.Fprintf(writer, "trade_no=%s status=%s money=%s\n", result["trade_no"], result["status"], result["money"])
+		})
+	}
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Panicln(err)
 	}
